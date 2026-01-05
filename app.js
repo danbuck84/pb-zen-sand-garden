@@ -51,7 +51,7 @@
         simulation: {
             gridResolution: 2,
             normalRate: 0.92,
-            disturbanceThreshold: 1.2,
+            disturbanceThreshold: 0.3,  // Lower threshold = cleaner result
             spreadRadius: 6
         }
     };
