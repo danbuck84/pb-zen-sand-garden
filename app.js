@@ -43,11 +43,11 @@
             dragMultiplier: 0.7
         },
 
-        // Simulation - physics-based gradual healing
+        // Simulation - blade effects apply strongly per pass
         simulation: {
             gridResolution: 2,
-            healingRate: 0.06,       // Gradual flattening
-            waveApplicationRate: 0.08 // Gradual wave application
+            healingRate: 0.95,        // Strong flattening per pass
+            waveApplicationRate: 0.95  // Strong wave application per pass
         }
     };
 
