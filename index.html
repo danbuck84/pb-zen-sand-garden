@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
@@ -7,17 +8,23 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="theme-color" content="#1A1A1A">
     <title>Zen Sand Garden</title>
-    <meta name="description" content="A meditative zen sand garden simulation. Touch to disturb, watch the blade restore tranquility.">
+    <meta name="description"
+        content="A meditative zen sand garden simulation. Touch to disturb, watch the blade restore tranquility.">
     <link rel="stylesheet" href="styles.css">
 </head>
+
 <body>
     <canvas id="garden"></canvas>
-    
-    <!-- Audio hooks for future implementation -->
-    <div id="audio-container" style="display: none;">
-        <!-- Future: ambient sounds, blade sounds, disturbance sounds -->
+
+    <!-- Speed control slider -->
+    <div id="speed-control">
+        <input type="range" id="speed-slider" min="1" max="100" value="30">
     </div>
+
+    <!-- Audio hooks for future implementation -->
+    <div id="audio-container" style="display: none;"></div>
 
     <script src="app.js"></script>
 </body>
+
 </html>

@@ -10,46 +10,44 @@
     const CONFIG = {
         // Sand appearance
         sand: {
-            baseColor: { r: 245, g: 240, b: 230 },      // #F5F0E6 - light cream
-            shadowColor: { r: 200, g: 190, b: 175 },    // Darker for valleys
-            highlightColor: { r: 255, g: 252, b: 248 }, // Lighter for peaks
-            grainDensity: 0.3
+            baseColor: { r: 245, g: 240, b: 230 },
+            shadowColor: { r: 200, g: 190, b: 175 },
+            highlightColor: { r: 255, g: 252, b: 248 },
         },
 
         // Garden dimensions
         garden: {
-            padding: 20,           // Padding from screen edge
-            frameWidth: 12,        // Dark rim width
+            padding: 20,
+            frameWidth: 12,
             frameColor: '#2D2D2D'
         },
 
         // Blade settings
         blade: {
-            rotationSpeed: 0.004,   // Radians per frame (faster, still meditative)
-            width: 8,               // Blade thickness
+            baseRotationSpeed: 0.003,  // Base speed (modified by slider)
+            width: 8,
             color: '#FAFAFA',
             shadowColor: 'rgba(0, 0, 0, 0.15)',
-            centerRadius: 14        // Center pivot size
+            centerRadius: 14
         },
 
-        // Wave pattern (comb side) - will be calculated based on teeth
+        // Wave pattern
         waves: {
-            amplitude: 1.0,         // Height of waves
-            sharpness: 0.7          // How sharp the wave peaks are
+            amplitude: 1.0,
         },
 
         // Interaction
         touch: {
-            radius: 30,             // Size of disturbance
-            strength: 3.0,          // How much the sand is displaced
-            dragMultiplier: 0.7     // Reduced strength while dragging
+            radius: 30,
+            strength: 3.0,
+            dragMultiplier: 0.7
         },
 
         // Simulation - physics-based gradual healing
         simulation: {
-            gridResolution: 2,      // Pixels per grid cell
-            healingRate: 0.08,      // SLOW healing per pass (physics-based)
-            waveApplicationRate: 0.12 // Gradual wave application
+            gridResolution: 2,
+            healingRate: 0.06,       // Gradual flattening
+            waveApplicationRate: 0.08 // Gradual wave application
         }
     };
 
@@ -58,48 +56,56 @@
     let gardenRadius, centerX, centerY;
     let bladeAngle = 0;
     let heightMap = [];
-    let targetHeightMap = []; // Target wave pattern for each cell
+    let targetHeightMap = [];
     let gridWidth, gridHeight;
     let isInteracting = false;
     let lastTouchPos = null;
     let animationId = null;
-    let teethCount = 0; // Will be calculated based on blade length
+    let teethCount = 0;
+    let rotationSpeed = CONFIG.blade.baseRotationSpeed;
+    let speedSlider = null;
 
     // ==================== AUDIO HOOKS (for future) ====================
     const AudioManager = {
         initialized: false,
-
-        init() {
-            this.initialized = true;
-        },
-
-        playAmbient() {
-            // Future: play ambient zen music/sounds
-        },
-
-        stopAmbient() {
-            // Future: stop ambient sounds
-        },
-
-        playDisturbSound(intensity) {
-            // Future: play sand disturbance sound
-        },
-
-        playBladeSound() {
-            // Future: subtle blade movement sound
-        }
+        init() { this.initialized = true; },
+        playAmbient() { },
+        stopAmbient() { },
+        playDisturbSound(intensity) { },
+        playBladeSound() { }
     };
 
     // ==================== INITIALIZATION ====================
     function init() {
         canvas = document.getElementById('garden');
         ctx = canvas.getContext('2d');
+        speedSlider = document.getElementById('speed-slider');
 
         setupCanvas();
         initHeightMap();
         setupEventListeners();
+        setupSpeedControl();
 
         animate();
+    }
+
+    function setupSpeedControl() {
+        if (speedSlider) {
+            // Set initial speed from slider
+            updateSpeed();
+
+            speedSlider.addEventListener('input', updateSpeed);
+
+            // Prevent touch events on slider from affecting the canvas
+            speedSlider.addEventListener('touchstart', (e) => e.stopPropagation());
+            speedSlider.addEventListener('touchmove', (e) => e.stopPropagation());
+        }
+    }
+
+    function updateSpeed() {
+        const value = parseInt(speedSlider.value);
+        // Map 1-100 to 0.001 - 0.015 (slow to fast)
+        rotationSpeed = 0.001 + (value / 100) * 0.014;
     }
 
     function setupCanvas() {
@@ -115,9 +121,9 @@
         centerX = window.innerWidth / 2;
         centerY = window.innerHeight / 2;
 
-        // Calculate teeth count based on blade length (matching wave count)
+        // Calculate teeth count based on blade length
         const bladeLength = gardenRadius - 20;
-        const teethSpacing = 12; // Pixels between teeth
+        const teethSpacing = 12;
         teethCount = Math.floor(bladeLength / teethSpacing);
     }
 
@@ -138,11 +144,10 @@
             }
         }
 
-        // Calculate and store target wave pattern
         calculateTargetWavePattern();
 
-        // Apply initial wave pattern
-        applyFullWavePattern();
+        // Start with half wavy, half smooth
+        applyInitialPattern();
     }
 
     function calculateTargetWavePattern() {
@@ -155,7 +160,6 @@
                 const dist = Math.sqrt(worldX * worldX + worldY * worldY);
 
                 if (dist < gardenRadius - 5) {
-                    // Wave frequency based on teeth count (they match!)
                     const waveFreq = teethCount / gardenRadius;
                     const waveVal = Math.sin(dist * waveFreq * Math.PI * 2);
                     targetHeightMap[y][x] = waveVal * CONFIG.waves.amplitude;
@@ -164,10 +168,21 @@
         }
     }
 
-    function applyFullWavePattern() {
+    function applyInitialPattern() {
+        // Start with half the sand wavy (right side), half smooth (left side)
+        const resolution = CONFIG.simulation.gridResolution;
+
         for (let y = 0; y < gridHeight; y++) {
             for (let x = 0; x < gridWidth; x++) {
-                heightMap[y][x] = targetHeightMap[y][x];
+                const worldX = (x * resolution) - gardenRadius;
+
+                if (worldX >= 0) {
+                    // Right side: wavy
+                    heightMap[y][x] = targetHeightMap[y][x];
+                } else {
+                    // Left side: smooth (flat)
+                    heightMap[y][x] = 0;
+                }
             }
         }
     }
@@ -258,18 +273,12 @@
 
     function getEventPos(e) {
         const rect = canvas.getBoundingClientRect();
-        return {
-            x: e.clientX - rect.left,
-            y: e.clientY - rect.top
-        };
+        return { x: e.clientX - rect.left, y: e.clientY - rect.top };
     }
 
     function getTouchPos(touch) {
         const rect = canvas.getBoundingClientRect();
-        return {
-            x: touch.clientX - rect.left,
-            y: touch.clientY - rect.top
-        };
+        return { x: touch.clientX - rect.left, y: touch.clientY - rect.top };
     }
 
     function handleResize() {
@@ -301,7 +310,6 @@
                         const falloff = 1 - (dist / radius);
                         const falloffSmooth = falloff * falloff;
 
-                        // Create chaotic disturbance (random-ish based on position)
                         const noise = Math.sin(gx * 0.5) * Math.cos(gy * 0.7);
 
                         heightMap[gy][gx] += noise * strength * falloffSmooth;
@@ -316,7 +324,7 @@
 
     // ==================== BLADE MECHANICS ====================
     function updateBlade() {
-        bladeAngle += CONFIG.blade.rotationSpeed;
+        bladeAngle += rotationSpeed;
         if (bladeAngle > Math.PI * 2) {
             bladeAngle -= Math.PI * 2;
         }
@@ -327,17 +335,15 @@
     function applyBladeEffects() {
         const resolution = CONFIG.simulation.gridResolution;
         const bladeLength = gardenRadius - 5;
+        const wedgeAngle = rotationSpeed * 2.5;
 
-        // Process a thin wedge that the blade just passed over
-        // FULL BLADE: process both directions from center
-        const wedgeAngle = CONFIG.blade.rotationSpeed * 2;
-
-        // Process BOTH sides of the blade (full diameter)
+        // Process both sides of the blade
         for (let side = 0; side < 2; side++) {
-            const sideAngle = side === 0 ? 0 : Math.PI; // 0 and 180 degrees
+            const sideAngle = side === 0 ? 0 : Math.PI;
+            const isCombSide = (side === 0); // Right side has teeth (comb)
 
             for (let r = 20; r < bladeLength; r += resolution) {
-                for (let a = -wedgeAngle; a <= 0; a += 0.015) {
+                for (let a = -wedgeAngle; a <= 0; a += 0.012) {
                     const angle = bladeAngle + a + sideAngle;
                     const worldX = Math.cos(angle) * r;
                     const worldY = Math.sin(angle) * r;
@@ -347,18 +353,14 @@
 
                     if (gridX >= 0 && gridX < gridWidth && gridY >= 0 && gridY < gridHeight) {
                         const currentHeight = heightMap[gridY][gridX];
-                        const targetHeight = targetHeightMap[gridY][gridX];
 
-                        // Determine which side based on blade orientation
-                        // One half has teeth (creates waves), other half is smooth
-                        if (side === 0) {
+                        if (isCombSide) {
                             // COMB SIDE - gradually apply wave pattern
-                            // Physics: move a small amount toward target each pass
+                            const targetHeight = targetHeightMap[gridY][gridX];
                             const diff = targetHeight - currentHeight;
                             heightMap[gridY][gridX] = currentHeight + diff * CONFIG.simulation.waveApplicationRate;
                         } else {
-                            // SMOOTH SIDE - gradually flatten toward smooth (zero-ish)
-                            // Physics: move a small amount toward flat each pass
+                            // SMOOTH SIDE - gradually flatten to ZERO (completely flat)
                             heightMap[gridY][gridX] = currentHeight * (1 - CONFIG.simulation.healingRate);
                         }
                     }
@@ -380,7 +382,6 @@
 
     function drawFrame() {
         const outerRadius = gardenRadius + CONFIG.garden.frameWidth;
-
         ctx.beginPath();
         ctx.arc(centerX, centerY, outerRadius, 0, Math.PI * 2);
         ctx.fillStyle = CONFIG.garden.frameColor;
@@ -417,7 +418,6 @@
 
     function getHeightColor(height) {
         const sand = CONFIG.sand;
-
         let r, g, b;
 
         if (height > 0) {
@@ -443,20 +443,17 @@
         ctx.translate(centerX, centerY);
         ctx.rotate(bladeAngle);
 
-        // Blade shadow
         ctx.shadowColor = blade.shadowColor;
         ctx.shadowBlur = 10;
         ctx.shadowOffsetX = 3;
         ctx.shadowOffsetY = 3;
 
-        // Draw FULL blade body (extends both directions from center)
+        // Draw FULL blade body
         ctx.beginPath();
-        // Right side
         ctx.moveTo(20, -blade.width / 2);
         ctx.lineTo(bladeLength, -blade.width / 2 - 2);
         ctx.lineTo(bladeLength, blade.width / 2 + 2);
         ctx.lineTo(20, blade.width / 2);
-        // Left side
         ctx.lineTo(-20, blade.width / 2);
         ctx.lineTo(-bladeLength, blade.width / 2 + 2);
         ctx.lineTo(-bladeLength, -blade.width / 2 - 2);
@@ -466,10 +463,9 @@
         ctx.fillStyle = blade.color;
         ctx.fill();
 
-        // Draw comb teeth on ONE side only (right side, bottom edge)
-        // Teeth count matches wave count!
+        // Draw comb teeth on RIGHT side only (positive X)
         const teethSpacing = (bladeLength - 25) / teethCount;
-        ctx.strokeStyle = '#E8E8E8';
+        ctx.strokeStyle = '#E0E0E0';
         ctx.lineWidth = 2;
 
         for (let i = 0; i < teethCount; i++) {
@@ -480,13 +476,14 @@
             ctx.stroke();
         }
 
+        // Left side stays smooth (no teeth) - it's the flattening side
+
         ctx.restore();
     }
 
     function drawCenter() {
         const blade = CONFIG.blade;
 
-        // Outer ring
         ctx.beginPath();
         ctx.arc(centerX, centerY, blade.centerRadius, 0, Math.PI * 2);
         ctx.fillStyle = '#E8E8E8';
@@ -495,13 +492,11 @@
         ctx.lineWidth = 2;
         ctx.stroke();
 
-        // Inner detail
         ctx.beginPath();
         ctx.arc(centerX, centerY, blade.centerRadius * 0.5, 0, Math.PI * 2);
         ctx.fillStyle = '#CCCCCC';
         ctx.fill();
 
-        // Center dot
         ctx.beginPath();
         ctx.arc(centerX, centerY, 3, 0, Math.PI * 2);
         ctx.fillStyle = '#999999';
