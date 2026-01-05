@@ -361,7 +361,7 @@
     function applyBladeEffects() {
         const resolution = CONFIG.simulation.gridResolution;
         const bladeLength = gardenRadius - 5;
-        const wedgeAngle = rotationSpeed * 3;
+        const wedgeAngle = rotationSpeed * 8;  // Much wider coverage
         const pushStrength = CONFIG.blade.pushStrength;
 
         for (let side = 0; side < 2; side++) {
@@ -369,7 +369,7 @@
             const isCombSide = (side === 0);
 
             for (let r = 20; r < bladeLength; r += resolution) {
-                for (let a = -wedgeAngle; a <= 0; a += 0.015) {
+                for (let a = -wedgeAngle; a <= 0; a += 0.01) {  // Finer step
                     const angle = bladeAngle + a + sideAngle;
                     const worldX = Math.cos(angle) * r;
                     const worldY = Math.sin(angle) * r;
@@ -387,31 +387,25 @@
                             const absDiff = Math.abs(diff);
 
                             if (absDiff > 1.5) {
-                                // Big disturbance: heal slowly
                                 const moveAmount = diff * pushStrength;
                                 heightMap[gridY][gridX] += moveAmount;
                                 if (absDiff > 2.5) {
                                     spreadToNeighbors(gridX, gridY, -moveAmount * 0.3, angle);
                                 }
                             } else if (absDiff > 0.1) {
-                                // Medium: heal moderately
                                 heightMap[gridY][gridX] = currentHeight + diff * 0.15;
                             } else {
-                                // Small: snap to target wave
                                 heightMap[gridY][gridX] = targetHeight;
                             }
                         } else {
-                            // SMOOTH SIDE: flattens to ZERO (completely flat)
+                            // SMOOTH SIDE: ALWAYS flatten to exactly 0
                             const absCurrent = Math.abs(currentHeight);
 
-                            if (absCurrent > 1.5) {
-                                // Big disturbance: flatten slowly
+                            if (absCurrent > 2.0) {
+                                // Only big disturbances heal slowly
                                 heightMap[gridY][gridX] = currentHeight * (1 - pushStrength);
-                                if (absCurrent > 2.5) {
-                                    spreadToNeighbors(gridX, gridY, currentHeight * pushStrength * 0.3, angle);
-                                }
                             } else {
-                                // Normal: flatten to exactly 0 (no texture)
+                                // Everything else: set to exactly 0
                                 heightMap[gridY][gridX] = 0;
                             }
                         }
