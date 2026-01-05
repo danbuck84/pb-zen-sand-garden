@@ -11,8 +11,8 @@
         // Sand appearance
         sand: {
             baseColor: { r: 245, g: 240, b: 230 },
-            shadowColor: { r: 200, g: 190, b: 175 },
-            highlightColor: { r: 255, g: 252, b: 248 },
+            shadowColor: { r: 180, g: 165, b: 145 },    // Darker for deeper holes
+            highlightColor: { r: 255, g: 252, b: 248 }, // Lighter for dunes
         },
 
         // Garden dimensions
@@ -24,7 +24,7 @@
 
         // Blade settings
         blade: {
-            baseRotationSpeed: 0.003,  // Base speed (modified by slider)
+            baseRotationSpeed: 0.003,
             width: 8,
             color: '#FAFAFA',
             shadowColor: 'rgba(0, 0, 0, 0.15)',
@@ -38,16 +38,22 @@
 
         // Interaction
         touch: {
-            radius: 30,
-            strength: 3.0,
-            dragMultiplier: 0.7
+            radius: 35,              // Size of disturbance area
+            digStrength: 0.15,       // How fast we dig holes (per frame while dragging)
+            pileStrength: 0.08,      // How fast we pile sand (per frame while holding)
+            maxHeight: 4,            // Max dune height
+            minHeight: -4            // Max hole depth
         },
 
-        // Simulation - blade effects apply strongly per pass
+        // Simulation
         simulation: {
             gridResolution: 2,
-            healingRate: 0.95,        // Strong flattening per pass
-            waveApplicationRate: 0.95  // Strong wave application per pass
+            // For normal undisturbed sand: apply pattern strongly
+            normalRate: 0.95,
+            // For disturbed sand (dunes/holes): fix gradually
+            disturbanceFixRate: 0.03,  // Slow fixing per pass
+            // Threshold to consider sand "disturbed"
+            disturbanceThreshold: 1.5
         }
     };
 
@@ -60,6 +66,8 @@
     let gridWidth, gridHeight;
     let isInteracting = false;
     let lastTouchPos = null;
+    let currentTouchPos = null;
+    let holdStartTime = 0;
     let animationId = null;
     let teethCount = 0;
     let rotationSpeed = CONFIG.blade.baseRotationSpeed;
@@ -91,12 +99,8 @@
 
     function setupSpeedControl() {
         if (speedSlider) {
-            // Set initial speed from slider
             updateSpeed();
-
             speedSlider.addEventListener('input', updateSpeed);
-
-            // Prevent touch events on slider from affecting the canvas
             speedSlider.addEventListener('touchstart', (e) => e.stopPropagation());
             speedSlider.addEventListener('touchmove', (e) => e.stopPropagation());
         }
@@ -104,7 +108,6 @@
 
     function updateSpeed() {
         const value = parseInt(speedSlider.value);
-        // Map 1-100 to 0.001 - 0.015 (slow to fast)
         rotationSpeed = 0.001 + (value / 100) * 0.014;
     }
 
@@ -121,7 +124,6 @@
         centerX = window.innerWidth / 2;
         centerY = window.innerHeight / 2;
 
-        // Calculate teeth count based on blade length
         const bladeLength = gardenRadius - 20;
         const teethSpacing = 12;
         teethCount = Math.floor(bladeLength / teethSpacing);
@@ -145,8 +147,6 @@
         }
 
         calculateTargetWavePattern();
-
-        // Start with half wavy, half smooth
         applyInitialPattern();
     }
 
@@ -169,7 +169,6 @@
     }
 
     function applyInitialPattern() {
-        // Start with half the sand wavy (right side), half smooth (left side)
         const resolution = CONFIG.simulation.gridResolution;
 
         for (let y = 0; y < gridHeight; y++) {
@@ -177,10 +176,8 @@
                 const worldX = (x * resolution) - gardenRadius;
 
                 if (worldX >= 0) {
-                    // Right side: wavy
                     heightMap[y][x] = targetHeightMap[y][x];
                 } else {
-                    // Left side: smooth (flat)
                     heightMap[y][x] = 0;
                 }
             }
@@ -207,34 +204,22 @@
         isInteracting = true;
         const pos = getEventPos(e);
         lastTouchPos = pos;
-        disturbSand(pos.x, pos.y, CONFIG.touch.strength);
+        currentTouchPos = pos;
+        holdStartTime = Date.now();
     }
 
     function handleInteractionMove(e) {
         if (!isInteracting) return;
         e.preventDefault();
         const pos = getEventPos(e);
-
-        if (lastTouchPos) {
-            const dx = pos.x - lastTouchPos.x;
-            const dy = pos.y - lastTouchPos.y;
-            const dist = Math.sqrt(dx * dx + dy * dy);
-            const steps = Math.ceil(dist / 5);
-
-            for (let i = 0; i <= steps; i++) {
-                const t = steps > 0 ? i / steps : 0;
-                const x = lastTouchPos.x + dx * t;
-                const y = lastTouchPos.y + dy * t;
-                disturbSand(x, y, CONFIG.touch.strength * CONFIG.touch.dragMultiplier);
-            }
-        }
-
-        lastTouchPos = pos;
+        lastTouchPos = currentTouchPos;
+        currentTouchPos = pos;
     }
 
     function handleInteractionEnd(e) {
         isInteracting = false;
         lastTouchPos = null;
+        currentTouchPos = null;
     }
 
     function handleTouchStart(e) {
@@ -243,7 +228,8 @@
             isInteracting = true;
             const pos = getTouchPos(e.touches[0]);
             lastTouchPos = pos;
-            disturbSand(pos.x, pos.y, CONFIG.touch.strength);
+            currentTouchPos = pos;
+            holdStartTime = Date.now();
         }
     }
 
@@ -252,22 +238,8 @@
         e.preventDefault();
         if (e.touches.length > 0) {
             const pos = getTouchPos(e.touches[0]);
-
-            if (lastTouchPos) {
-                const dx = pos.x - lastTouchPos.x;
-                const dy = pos.y - lastTouchPos.y;
-                const dist = Math.sqrt(dx * dx + dy * dy);
-                const steps = Math.ceil(dist / 5);
-
-                for (let i = 0; i <= steps; i++) {
-                    const t = steps > 0 ? i / steps : 0;
-                    const x = lastTouchPos.x + dx * t;
-                    const y = lastTouchPos.y + dy * t;
-                    disturbSand(x, y, CONFIG.touch.strength * CONFIG.touch.dragMultiplier);
-                }
-            }
-
-            lastTouchPos = pos;
+            lastTouchPos = currentTouchPos;
+            currentTouchPos = pos;
         }
     }
 
@@ -286,17 +258,40 @@
         initHeightMap();
     }
 
-    // ==================== SAND DISTURBANCE ====================
-    function disturbSand(screenX, screenY, strength) {
-        const resolution = CONFIG.simulation.gridResolution;
-        const gridX = Math.floor((screenX - centerX + gardenRadius) / resolution);
-        const gridY = Math.floor((screenY - centerY + gardenRadius) / resolution);
+    // ==================== SAND INTERACTION (called each frame) ====================
+    function processInteraction() {
+        if (!isInteracting || !currentTouchPos) return;
+
+        const screenX = currentTouchPos.x;
+        const screenY = currentTouchPos.y;
 
         const worldX = screenX - centerX;
         const worldY = screenY - centerY;
         const distFromCenter = Math.sqrt(worldX * worldX + worldY * worldY);
         if (distFromCenter > gardenRadius - 10) return;
 
+        // Check if dragging or holding still
+        let isDragging = false;
+        if (lastTouchPos) {
+            const dx = currentTouchPos.x - lastTouchPos.x;
+            const dy = currentTouchPos.y - lastTouchPos.y;
+            const moveDist = Math.sqrt(dx * dx + dy * dy);
+            isDragging = moveDist > 2; // Threshold for movement
+        }
+
+        if (isDragging) {
+            // DRAGGING = dig holes (lower the sand)
+            digHole(screenX, screenY);
+        } else {
+            // HOLDING STILL = pile sand (raise dunes)
+            pileSand(screenX, screenY);
+        }
+    }
+
+    function digHole(screenX, screenY) {
+        const resolution = CONFIG.simulation.gridResolution;
+        const gridX = Math.floor((screenX - centerX + gardenRadius) / resolution);
+        const gridY = Math.floor((screenY - centerY + gardenRadius) / resolution);
         const radius = Math.ceil(CONFIG.touch.radius / resolution);
 
         for (let dy = -radius; dy <= radius; dy++) {
@@ -308,18 +303,41 @@
                     const dist = Math.sqrt(dx * dx + dy * dy);
                     if (dist <= radius) {
                         const falloff = 1 - (dist / radius);
-                        const falloffSmooth = falloff * falloff;
+                        const strength = falloff * falloff * CONFIG.touch.digStrength;
 
-                        const noise = Math.sin(gx * 0.5) * Math.cos(gy * 0.7);
-
-                        heightMap[gy][gx] += noise * strength * falloffSmooth;
-                        heightMap[gy][gx] = Math.max(-3, Math.min(3, heightMap[gy][gx]));
+                        // Dig down (lower height)
+                        heightMap[gy][gx] -= strength;
+                        heightMap[gy][gx] = Math.max(CONFIG.touch.minHeight, heightMap[gy][gx]);
                     }
                 }
             }
         }
+    }
 
-        AudioManager.playDisturbSound(strength / CONFIG.touch.strength);
+    function pileSand(screenX, screenY) {
+        const resolution = CONFIG.simulation.gridResolution;
+        const gridX = Math.floor((screenX - centerX + gardenRadius) / resolution);
+        const gridY = Math.floor((screenY - centerY + gardenRadius) / resolution);
+        const radius = Math.ceil(CONFIG.touch.radius / resolution);
+
+        for (let dy = -radius; dy <= radius; dy++) {
+            for (let dx = -radius; dx <= radius; dx++) {
+                const gx = gridX + dx;
+                const gy = gridY + dy;
+
+                if (gx >= 0 && gx < gridWidth && gy >= 0 && gy < gridHeight) {
+                    const dist = Math.sqrt(dx * dx + dy * dy);
+                    if (dist <= radius) {
+                        const falloff = 1 - (dist / radius);
+                        const strength = falloff * falloff * CONFIG.touch.pileStrength;
+
+                        // Pile up (raise height)
+                        heightMap[gy][gx] += strength;
+                        heightMap[gy][gx] = Math.min(CONFIG.touch.maxHeight, heightMap[gy][gx]);
+                    }
+                }
+            }
+        }
     }
 
     // ==================== BLADE MECHANICS ====================
@@ -336,11 +354,11 @@
         const resolution = CONFIG.simulation.gridResolution;
         const bladeLength = gardenRadius - 5;
         const wedgeAngle = rotationSpeed * 2.5;
+        const threshold = CONFIG.simulation.disturbanceThreshold;
 
-        // Process both sides of the blade
         for (let side = 0; side < 2; side++) {
             const sideAngle = side === 0 ? 0 : Math.PI;
-            const isCombSide = (side === 0); // Right side has teeth (comb)
+            const isCombSide = (side === 0);
 
             for (let r = 20; r < bladeLength; r += resolution) {
                 for (let a = -wedgeAngle; a <= 0; a += 0.012) {
@@ -353,15 +371,24 @@
 
                     if (gridX >= 0 && gridX < gridWidth && gridY >= 0 && gridY < gridHeight) {
                         const currentHeight = heightMap[gridY][gridX];
+                        let targetHeight;
 
                         if (isCombSide) {
-                            // COMB SIDE - gradually apply wave pattern
-                            const targetHeight = targetHeightMap[gridY][gridX];
-                            const diff = targetHeight - currentHeight;
-                            heightMap[gridY][gridX] = currentHeight + diff * CONFIG.simulation.waveApplicationRate;
+                            targetHeight = targetHeightMap[gridY][gridX]; // Wave pattern
                         } else {
-                            // SMOOTH SIDE - gradually flatten to ZERO (completely flat)
-                            heightMap[gridY][gridX] = currentHeight * (1 - CONFIG.simulation.healingRate);
+                            targetHeight = 0; // Flat/smooth
+                        }
+
+                        const diff = targetHeight - currentHeight;
+                        const absDiff = Math.abs(diff);
+
+                        // Check if this is a disturbance (dune or hole)
+                        if (absDiff > threshold) {
+                            // DISTURBED: fix gradually (multiple passes needed)
+                            heightMap[gridY][gridX] = currentHeight + diff * CONFIG.simulation.disturbanceFixRate;
+                        } else {
+                            // NORMAL: apply pattern strongly
+                            heightMap[gridY][gridX] = currentHeight + diff * CONFIG.simulation.normalRate;
                         }
                     }
                 }
@@ -421,12 +448,14 @@
         let r, g, b;
 
         if (height > 0) {
-            const t = Math.min(height / 2, 1);
+            // Dunes are lighter
+            const t = Math.min(height / 3, 1);
             r = sand.baseColor.r + (sand.highlightColor.r - sand.baseColor.r) * t;
             g = sand.baseColor.g + (sand.highlightColor.g - sand.baseColor.g) * t;
             b = sand.baseColor.b + (sand.highlightColor.b - sand.baseColor.b) * t;
         } else {
-            const t = Math.min(-height / 2, 1);
+            // Holes are darker
+            const t = Math.min(-height / 3, 1);
             r = sand.baseColor.r + (sand.shadowColor.r - sand.baseColor.r) * t;
             g = sand.baseColor.g + (sand.shadowColor.g - sand.baseColor.g) * t;
             b = sand.baseColor.b + (sand.shadowColor.b - sand.baseColor.b) * t;
@@ -448,7 +477,7 @@
         ctx.shadowOffsetX = 3;
         ctx.shadowOffsetY = 3;
 
-        // Draw FULL blade body
+        // Full blade body
         ctx.beginPath();
         ctx.moveTo(20, -blade.width / 2);
         ctx.lineTo(bladeLength, -blade.width / 2 - 2);
@@ -463,7 +492,7 @@
         ctx.fillStyle = blade.color;
         ctx.fill();
 
-        // Draw comb teeth on RIGHT side only (positive X)
+        // Comb teeth on RIGHT side only
         const teethSpacing = (bladeLength - 25) / teethCount;
         ctx.strokeStyle = '#E0E0E0';
         ctx.lineWidth = 2;
@@ -475,8 +504,6 @@
             ctx.lineTo(x, blade.width / 2 + 12);
             ctx.stroke();
         }
-
-        // Left side stays smooth (no teeth) - it's the flattening side
 
         ctx.restore();
     }
@@ -505,6 +532,7 @@
 
     // ==================== ANIMATION LOOP ====================
     function animate() {
+        processInteraction(); // Handle sand interaction each frame
         updateBlade();
         render();
         animationId = requestAnimationFrame(animate);
