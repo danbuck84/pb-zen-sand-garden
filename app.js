@@ -379,31 +379,41 @@
 
                     if (gridX >= 0 && gridX < gridWidth && gridY >= 0 && gridY < gridHeight) {
                         const currentHeight = heightMap[gridY][gridX];
-                        let targetHeight = isCombSide ? targetHeightMap[gridY][gridX] : 0;
 
-                        const diff = targetHeight - currentHeight;
-                        const absDiff = Math.abs(diff);
+                        if (isCombSide) {
+                            // COMB SIDE: creates wave pattern
+                            const targetHeight = targetHeightMap[gridY][gridX];
+                            const diff = targetHeight - currentHeight;
+                            const absDiff = Math.abs(diff);
 
-                        // Three tiers:
-                        // 1. Large disturbance (holes/dunes) > 1.5: heal slowly
-                        // 2. Medium difference 0.1-1.5: heal at medium rate
-                        // 3. Tiny difference < 0.1: snap to clean
-
-                        if (absDiff > 1.5) {
-                            // BIG disturbance: heal very slowly
-                            const moveAmount = diff * pushStrength;
-                            heightMap[gridY][gridX] += moveAmount;
-
-                            // Spread excess sand
-                            if (absDiff > 2.5) {
-                                spreadToNeighbors(gridX, gridY, -moveAmount * 0.3, angle);
+                            if (absDiff > 1.5) {
+                                // Big disturbance: heal slowly
+                                const moveAmount = diff * pushStrength;
+                                heightMap[gridY][gridX] += moveAmount;
+                                if (absDiff > 2.5) {
+                                    spreadToNeighbors(gridX, gridY, -moveAmount * 0.3, angle);
+                                }
+                            } else if (absDiff > 0.1) {
+                                // Medium: heal moderately
+                                heightMap[gridY][gridX] = currentHeight + diff * 0.15;
+                            } else {
+                                // Small: snap to target wave
+                                heightMap[gridY][gridX] = targetHeight;
                             }
-                        } else if (absDiff > 0.1) {
-                            // Medium difference: heal at moderate rate
-                            heightMap[gridY][gridX] = currentHeight + diff * 0.15;
                         } else {
-                            // Tiny difference: snap to clean
-                            heightMap[gridY][gridX] = targetHeight;
+                            // SMOOTH SIDE: flattens to ZERO (completely flat)
+                            const absCurrent = Math.abs(currentHeight);
+
+                            if (absCurrent > 1.5) {
+                                // Big disturbance: flatten slowly
+                                heightMap[gridY][gridX] = currentHeight * (1 - pushStrength);
+                                if (absCurrent > 2.5) {
+                                    spreadToNeighbors(gridX, gridY, currentHeight * pushStrength * 0.3, angle);
+                                }
+                            } else {
+                                // Normal: flatten to exactly 0 (no texture)
+                                heightMap[gridY][gridX] = 0;
+                            }
                         }
                     }
                 }
