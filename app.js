@@ -362,7 +362,6 @@
         const resolution = CONFIG.simulation.gridResolution;
         const bladeLength = gardenRadius - 5;
         const wedgeAngle = rotationSpeed * 3;
-        const threshold = CONFIG.simulation.disturbanceThreshold;
         const pushStrength = CONFIG.blade.pushStrength;
 
         for (let side = 0; side < 2; side++) {
@@ -385,18 +384,26 @@
                         const diff = targetHeight - currentHeight;
                         const absDiff = Math.abs(diff);
 
-                        if (absDiff > threshold) {
-                            // Disturbed area: fix gradually and redistribute
+                        // Three tiers:
+                        // 1. Large disturbance (holes/dunes) > 1.5: heal slowly
+                        // 2. Medium difference 0.1-1.5: heal at medium rate
+                        // 3. Tiny difference < 0.1: snap to clean
+
+                        if (absDiff > 1.5) {
+                            // BIG disturbance: heal very slowly
                             const moveAmount = diff * pushStrength;
                             heightMap[gridY][gridX] += moveAmount;
 
-                            // Spread some sand to neighbors (conservation)
-                            if (absDiff > threshold * 2) {
+                            // Spread excess sand
+                            if (absDiff > 2.5) {
                                 spreadToNeighbors(gridX, gridY, -moveAmount * 0.3, angle);
                             }
+                        } else if (absDiff > 0.1) {
+                            // Medium difference: heal at moderate rate
+                            heightMap[gridY][gridX] = currentHeight + diff * 0.15;
                         } else {
-                            // Normal area: apply pattern
-                            heightMap[gridY][gridX] = currentHeight + diff * CONFIG.simulation.normalRate;
+                            // Tiny difference: snap to clean
+                            heightMap[gridY][gridX] = targetHeight;
                         }
                     }
                 }
