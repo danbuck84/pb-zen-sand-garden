@@ -30,7 +30,7 @@
             color: '#FAFAFA',
             shadowColor: 'rgba(0, 0, 0, 0.15)',
             centerRadius: 14,
-            pushStrength: 0.12
+            pushStrength: 0.025  // Much slower healing - many passes needed
         },
 
         // Wave pattern
