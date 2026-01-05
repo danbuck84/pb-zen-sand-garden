@@ -1,6 +1,7 @@
 /**
  * Zen Sand Garden
  * A meditative sand garden simulation with a rotating dual-sided blade
+ * Features realistic sand physics with redistribution
  */
 
 (function () {
@@ -11,8 +12,8 @@
         // Sand appearance
         sand: {
             baseColor: { r: 245, g: 240, b: 230 },
-            shadowColor: { r: 180, g: 165, b: 145 },    // Darker for deeper holes
-            highlightColor: { r: 255, g: 252, b: 248 }, // Lighter for dunes
+            shadowColor: { r: 170, g: 155, b: 135 },
+            highlightColor: { r: 255, g: 252, b: 248 },
         },
 
         // Garden dimensions
@@ -28,7 +29,8 @@
             width: 8,
             color: '#FAFAFA',
             shadowColor: 'rgba(0, 0, 0, 0.15)',
-            centerRadius: 14
+            centerRadius: 14,
+            pushStrength: 0.15  // How strongly the blade pushes sand
         },
 
         // Wave pattern
@@ -38,22 +40,21 @@
 
         // Interaction
         touch: {
-            radius: 35,              // Size of disturbance area
-            digStrength: 0.15,       // How fast we dig holes (per frame while dragging)
-            pileStrength: 0.08,      // How fast we pile sand (per frame while holding)
-            maxHeight: 4,            // Max dune height
-            minHeight: -4            // Max hole depth
+            radius: 35,
+            digStrength: 0.2,
+            pileStrength: 0.1,
+            maxHeight: 5,
+            minHeight: -5
         },
 
         // Simulation
         simulation: {
             gridResolution: 2,
-            // For normal undisturbed sand: apply pattern strongly
-            normalRate: 0.95,
-            // For disturbed sand (dunes/holes): fix gradually
-            disturbanceFixRate: 0.03,  // Slow fixing per pass
-            // Threshold to consider sand "disturbed"
-            disturbanceThreshold: 1.5
+            normalRate: 0.92,
+            disturbanceThreshold: 1.2,
+            // Sand redistribution
+            spreadRadius: 8,      // How far sand spreads when pushed
+            spreadDecay: 0.7      // How much sand is preserved when spreading
         }
     };
 
@@ -63,11 +64,11 @@
     let bladeAngle = 0;
     let heightMap = [];
     let targetHeightMap = [];
+    let excessSandPool = 0;  // Accumulates sand pushed by blade
     let gridWidth, gridHeight;
     let isInteracting = false;
     let lastTouchPos = null;
     let currentTouchPos = null;
-    let holdStartTime = 0;
     let animationId = null;
     let teethCount = 0;
     let rotationSpeed = CONFIG.blade.baseRotationSpeed;
@@ -136,6 +137,7 @@
 
         heightMap = [];
         targetHeightMap = [];
+        excessSandPool = 0;
 
         for (let y = 0; y < gridHeight; y++) {
             heightMap[y] = [];
@@ -174,7 +176,6 @@
         for (let y = 0; y < gridHeight; y++) {
             for (let x = 0; x < gridWidth; x++) {
                 const worldX = (x * resolution) - gardenRadius;
-
                 if (worldX >= 0) {
                     heightMap[y][x] = targetHeightMap[y][x];
                 } else {
@@ -205,7 +206,6 @@
         const pos = getEventPos(e);
         lastTouchPos = pos;
         currentTouchPos = pos;
-        holdStartTime = Date.now();
     }
 
     function handleInteractionMove(e) {
@@ -229,7 +229,6 @@
             const pos = getTouchPos(e.touches[0]);
             lastTouchPos = pos;
             currentTouchPos = pos;
-            holdStartTime = Date.now();
         }
     }
 
@@ -258,7 +257,7 @@
         initHeightMap();
     }
 
-    // ==================== SAND INTERACTION (called each frame) ====================
+    // ==================== SAND INTERACTION ====================
     function processInteraction() {
         if (!isInteracting || !currentTouchPos) return;
 
@@ -270,20 +269,16 @@
         const distFromCenter = Math.sqrt(worldX * worldX + worldY * worldY);
         if (distFromCenter > gardenRadius - 10) return;
 
-        // Check if dragging or holding still
         let isDragging = false;
         if (lastTouchPos) {
             const dx = currentTouchPos.x - lastTouchPos.x;
             const dy = currentTouchPos.y - lastTouchPos.y;
-            const moveDist = Math.sqrt(dx * dx + dy * dy);
-            isDragging = moveDist > 2; // Threshold for movement
+            isDragging = Math.sqrt(dx * dx + dy * dy) > 2;
         }
 
         if (isDragging) {
-            // DRAGGING = dig holes (lower the sand)
             digHole(screenX, screenY);
         } else {
-            // HOLDING STILL = pile sand (raise dunes)
             pileSand(screenX, screenY);
         }
     }
@@ -305,9 +300,15 @@
                         const falloff = 1 - (dist / radius);
                         const strength = falloff * falloff * CONFIG.touch.digStrength;
 
-                        // Dig down (lower height)
-                        heightMap[gy][gx] -= strength;
-                        heightMap[gy][gx] = Math.max(CONFIG.touch.minHeight, heightMap[gy][gx]);
+                        // Dig down - the removed sand goes into the pool
+                        const removed = Math.min(heightMap[gy][gx] - CONFIG.touch.minHeight, strength);
+                        if (removed > 0) {
+                            heightMap[gy][gx] -= removed;
+                            excessSandPool += removed * 0.5; // Some sand goes to pool
+                        } else {
+                            heightMap[gy][gx] -= strength;
+                            heightMap[gy][gx] = Math.max(CONFIG.touch.minHeight, heightMap[gy][gx]);
+                        }
                     }
                 }
             }
@@ -331,7 +332,6 @@
                         const falloff = 1 - (dist / radius);
                         const strength = falloff * falloff * CONFIG.touch.pileStrength;
 
-                        // Pile up (raise height)
                         heightMap[gy][gx] += strength;
                         heightMap[gy][gx] = Math.min(CONFIG.touch.maxHeight, heightMap[gy][gx]);
                     }
@@ -348,20 +348,22 @@
         }
 
         applyBladeEffects();
+        redistributeSand();
     }
 
     function applyBladeEffects() {
         const resolution = CONFIG.simulation.gridResolution;
         const bladeLength = gardenRadius - 5;
-        const wedgeAngle = rotationSpeed * 2.5;
+        const wedgeAngle = rotationSpeed * 3;
         const threshold = CONFIG.simulation.disturbanceThreshold;
+        const pushStrength = CONFIG.blade.pushStrength;
 
         for (let side = 0; side < 2; side++) {
             const sideAngle = side === 0 ? 0 : Math.PI;
             const isCombSide = (side === 0);
 
             for (let r = 20; r < bladeLength; r += resolution) {
-                for (let a = -wedgeAngle; a <= 0; a += 0.012) {
+                for (let a = -wedgeAngle; a <= 0; a += 0.015) {
                     const angle = bladeAngle + a + sideAngle;
                     const worldX = Math.cos(angle) * r;
                     const worldY = Math.sin(angle) * r;
@@ -371,29 +373,94 @@
 
                     if (gridX >= 0 && gridX < gridWidth && gridY >= 0 && gridY < gridHeight) {
                         const currentHeight = heightMap[gridY][gridX];
-                        let targetHeight;
+                        let targetHeight = isCombSide ? targetHeightMap[gridY][gridX] : 0;
 
-                        if (isCombSide) {
-                            targetHeight = targetHeightMap[gridY][gridX]; // Wave pattern
-                        } else {
-                            targetHeight = 0; // Flat/smooth
+                        // If current is higher than target (dune), push the excess
+                        if (currentHeight > targetHeight + threshold) {
+                            // Calculate how much to push down
+                            const excess = currentHeight - targetHeight;
+                            const pushed = excess * pushStrength;
+
+                            // Remove from this cell
+                            heightMap[gridY][gridX] -= pushed;
+
+                            // Add to excess pool for redistribution
+                            excessSandPool += pushed * CONFIG.simulation.spreadDecay;
+
+                            // Also spread to nearby cells in the direction of blade movement
+                            spreadSandFromBlade(gridX, gridY, angle, pushed * 0.3);
                         }
+                        // If current is lower than target (hole), fill from pool
+                        else if (currentHeight < targetHeight - threshold && excessSandPool > 0) {
+                            const deficit = targetHeight - currentHeight;
+                            const fillAmount = Math.min(deficit * pushStrength, excessSandPool * 0.1);
 
-                        const diff = targetHeight - currentHeight;
-                        const absDiff = Math.abs(diff);
-
-                        // Check if this is a disturbance (dune or hole)
-                        if (absDiff > threshold) {
-                            // DISTURBED: fix gradually (multiple passes needed)
-                            heightMap[gridY][gridX] = currentHeight + diff * CONFIG.simulation.disturbanceFixRate;
-                        } else {
-                            // NORMAL: apply pattern strongly
+                            heightMap[gridY][gridX] += fillAmount;
+                            excessSandPool -= fillAmount;
+                        }
+                        // Normal sand - apply pattern
+                        else {
+                            const diff = targetHeight - currentHeight;
                             heightMap[gridY][gridX] = currentHeight + diff * CONFIG.simulation.normalRate;
                         }
                     }
                 }
             }
         }
+    }
+
+    function spreadSandFromBlade(originX, originY, bladeAngle, amount) {
+        if (amount < 0.01) return;
+
+        const resolution = CONFIG.simulation.gridResolution;
+        const spreadRadius = CONFIG.simulation.spreadRadius;
+
+        // Spread in the direction the blade is moving (perpendicular to blade angle)
+        const spreadAngle = bladeAngle + Math.PI / 2;
+        const spreadDirX = Math.cos(spreadAngle);
+        const spreadDirY = Math.sin(spreadAngle);
+
+        for (let d = 1; d <= spreadRadius; d++) {
+            const gx = originX + Math.round(spreadDirX * d);
+            const gy = originY + Math.round(spreadDirY * d);
+
+            if (gx >= 0 && gx < gridWidth && gy >= 0 && gy < gridHeight) {
+                const falloff = 1 - (d / spreadRadius);
+                const deposit = amount * falloff * falloff * 0.15;
+
+                heightMap[gy][gx] += deposit;
+            }
+        }
+    }
+
+    function redistributeSand() {
+        // Slowly distribute excess sand pool into holes
+        if (excessSandPool < 0.01) return;
+
+        const resolution = CONFIG.simulation.gridResolution;
+        const distributePerFrame = excessSandPool * 0.02; // Distribute 2% per frame
+        let distributed = 0;
+
+        // Find holes and fill them
+        for (let y = 0; y < gridHeight && distributed < distributePerFrame; y++) {
+            for (let x = 0; x < gridWidth && distributed < distributePerFrame; x++) {
+                // Check if within garden circle
+                const worldX = (x * resolution) - gardenRadius;
+                const worldY = (y * resolution) - gardenRadius;
+                const dist = Math.sqrt(worldX * worldX + worldY * worldY);
+                if (dist > gardenRadius - 5) continue;
+
+                // If this is a hole, fill it a tiny bit
+                if (heightMap[y][x] < -0.5) {
+                    const fillAmount = Math.min(0.01, distributePerFrame - distributed);
+                    heightMap[y][x] += fillAmount;
+                    distributed += fillAmount;
+                }
+            }
+        }
+
+        excessSandPool -= distributed;
+        if (excessSandPool < 0) excessSandPool = 0;
     }
 
     // ==================== RENDERING ====================
@@ -448,13 +515,11 @@
         let r, g, b;
 
         if (height > 0) {
-            // Dunes are lighter
             const t = Math.min(height / 3, 1);
             r = sand.baseColor.r + (sand.highlightColor.r - sand.baseColor.r) * t;
             g = sand.baseColor.g + (sand.highlightColor.g - sand.baseColor.g) * t;
             b = sand.baseColor.b + (sand.highlightColor.b - sand.baseColor.b) * t;
         } else {
-            // Holes are darker
             const t = Math.min(-height / 3, 1);
             r = sand.baseColor.r + (sand.shadowColor.r - sand.baseColor.r) * t;
             g = sand.baseColor.g + (sand.shadowColor.g - sand.baseColor.g) * t;
@@ -477,7 +542,6 @@
         ctx.shadowOffsetX = 3;
         ctx.shadowOffsetY = 3;
 
-        // Full blade body
         ctx.beginPath();
         ctx.moveTo(20, -blade.width / 2);
         ctx.lineTo(bladeLength, -blade.width / 2 - 2);
@@ -492,7 +556,6 @@
         ctx.fillStyle = blade.color;
         ctx.fill();
 
-        // Comb teeth on RIGHT side only
         const teethSpacing = (bladeLength - 25) / teethCount;
         ctx.strokeStyle = '#E0E0E0';
         ctx.lineWidth = 2;
@@ -532,7 +595,7 @@
 
     // ==================== ANIMATION LOOP ====================
     function animate() {
-        processInteraction(); // Handle sand interaction each frame
+        processInteraction();
         updateBlade();
         render();
         animationId = requestAnimationFrame(animate);
